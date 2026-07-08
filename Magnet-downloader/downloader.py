@@ -4,9 +4,16 @@ import os
 import time
 import libtorrent as lt
 
+
+def strip_trackers(magnet: str) -> str:
+    parts = magnet.split("&")
+    clean = [p for p in parts if not p.startswith("tr=")]
+    return "&".join(clean)
+
+
 def download(magnet: str, save_path: str = "."):
-    ses = lt.session()
-    ses.listen_on(6881, 6891)
+    settings = {"listen_interfaces": "0.0.0.0:6881"}
+    ses = lt.session(settings)
 
     params = lt.parse_magnet_uri(magnet)
     params.save_path = save_path
@@ -14,10 +21,10 @@ def download(magnet: str, save_path: str = "."):
     print(f"\n⏳ Fetching metadata...")
     handle = ses.add_torrent(params)
 
-    while not handle.has_metadata():
+    while not handle.status().has_metadata:
         time.sleep(1)
 
-    info = handle.get_torrent_info()
+    info = handle.torrent_file()
     print(f"📦 Name:  {info.name()}")
     print(f"📁 Size:  {info.total_size() / 1_000_000:.1f} MB")
     print(f"💾 Saving to: {save_path}\n")
@@ -45,6 +52,9 @@ def main():
     if not magnet.startswith("magnet:"):
         print("❌ Not a valid magnet link")
         sys.exit(1)
+
+    magnet = strip_trackers(magnet)
+    print("🧹 Trackers stripped")
 
     save_path = input("Save path [~/Downloads]: ").strip() or "~/Downloads"
     save_path = os.path.expanduser(save_path)
