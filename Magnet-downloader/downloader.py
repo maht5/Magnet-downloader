@@ -4,10 +4,21 @@ import os
 import time
 import libtorrent as lt
 
+# Trackers known for aggressive logging/tracking that we strip out.
+# We keep the rest since more trackers = faster peer discovery = faster download.
+BLOCKED_TRACKER_KEYWORDS = [
+    "rarbg",
+]
+
 
 def strip_trackers(magnet: str) -> str:
     parts = magnet.split("&")
-    clean = [p for p in parts if not p.startswith("tr=")]
+    clean = []
+    for p in parts:
+        if p.startswith("tr="):
+            if any(bad in p.lower() for bad in BLOCKED_TRACKER_KEYWORDS):
+                continue
+        clean.append(p)
     return "&".join(clean)
 
 
@@ -29,6 +40,9 @@ def download(magnet: str, save_path: str = "."):
     print(f"📁 Size:  {info.total_size() / 1_000_000:.1f} MB")
     print(f"💾 Saving to: {save_path}\n")
 
+    stall_seconds = 0
+    stall_threshold = 20   # seconds with 0 peers before we force a reconnect
+
     while not handle.is_seed():
         s = handle.status()
         bar_len = 30
@@ -37,9 +51,22 @@ def download(magnet: str, save_path: str = "."):
         dl = s.download_rate / 1000
         ul = s.upload_rate / 1000
         peers = s.num_peers
+
+        if peers == 0:
+            stall_seconds += 1
+        else:
+            stall_seconds = 0
+
+        status_txt = ""
+        if stall_seconds >= stall_threshold:
+            status_txt = "  ⚠ reconnecting..."
+            handle.force_reannounce()
+            handle.force_dht_announce()
+            stall_seconds = 0
+
         print(
             f"\r[{bar}] {s.progress * 100:.1f}%  "
-            f"↓ {dl:.0f} kB/s  ↑ {ul:.0f} kB/s  peers: {peers}  ",
+            f"↓ {dl:.0f} kB/s  ↑ {ul:.0f} kB/s  peers: {peers}{status_txt}          ",
             end="", flush=True
         )
         time.sleep(1)
@@ -54,7 +81,7 @@ def main():
         sys.exit(1)
 
     magnet = strip_trackers(magnet)
-    print("🧹 Trackers stripped")
+    print("🧹 Untrustworthy trackers stripped (kept the rest for speed)")
 
     save_path = input("Save path [~/Downloads]: ").strip() or "~/Downloads"
     save_path = os.path.expanduser(save_path)
